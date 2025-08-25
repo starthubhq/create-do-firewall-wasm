@@ -1,0 +1,40 @@
+name: release-wasm
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create a Release & upload assets
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust + wasm32-wasi
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasi
+
+      - name: Build (release, wasm32-wasi)
+        run: |
+          cargo build --release --target wasm32-wasi
+          cp target/wasm32-wasi/release/module.wasm module.wasm
+
+      - name: Generate checksums
+        run: |
+          sha256sum module.wasm > module.wasm.sha256
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            module.wasm
+            module.wasm.sha256
