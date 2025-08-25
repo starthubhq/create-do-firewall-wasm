@@ -16,12 +16,12 @@ jobs:
       - name: Install Rust + WASI target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1   # <-- was wasm32-wasi
+          targets: wasm32-wasi
 
       - name: Build (release)
         run: |
-          cargo build --release --target wasm32-wasip1
-          cp target/wasm32-wasip1/release/module.wasm module.wasm
+          cargo build --release --target wasm32-wasi
+          cp target/wasm32-wasi/release/module.wasm module.wasm
 
       - name: Generate checksums
         run: |
