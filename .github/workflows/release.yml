@@ -1,0 +1,48 @@
+name: release-wasm
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Install nightly + target for components (wasip1)
+      - name: Install Rust nightly + wasm32-wasip1
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-wasip1
+
+      # cargo-component (builds Wasm *components* that import wasi:http, etc.)
+      - name: Install cargo-component
+        run: cargo +nightly install cargo-component --locked
+
+      # Build as a component (preview2/WASI HTTP capable)
+      - name: Build (release, wasm32-wasip1 component)
+        run: |
+          cargo +nightly component build --release --target wasm32-wasip1
+          # Grab the produced .wasm (there should be exactly one artifact in this dir)
+          WASM_OUT="$(find target/wasm32-wasip1/release -maxdepth 1 -type f -name '*.wasm' -print -quit)"
+          test -n "$WASM_OUT" || (echo "No Wasm artifact found" && exit 1)
+          cp "$WASM_OUT" module.wasm
+
+      - name: Generate checksums
+        run: sha256sum module.wasm > module.wasm.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            module.wasm
+            module.wasm.sha256

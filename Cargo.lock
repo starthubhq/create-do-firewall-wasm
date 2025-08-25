@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "http-client"
-version = "0.0.0"
+version = "0.0.10"
 dependencies = [
  "serde",
  "serde_json",
