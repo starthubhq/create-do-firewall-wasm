@@ -1,0 +1,16 @@
+[package]
+name = "http-client"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[dependencies]
+waki = { version = "0.4.2", features = ["json", "multipart"] }
+serde = { version = "1.0.202", features = ["derive"] }
+serde_json = "1.0"
+
+# reduce wasm binary size
+[profile.release]
+lto = true
+strip = "symbols"
