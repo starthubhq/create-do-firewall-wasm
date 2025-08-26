@@ -1,7 +1,7 @@
 use std::io::{self, Read};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use waki::Client;
 
@@ -9,11 +9,6 @@ use waki::Client;
 struct Input {
     #[serde(default)] state: Value,
     #[serde(default)] params: Value,
-}
-
-#[derive(Serialize)]
-struct Patch {
-    my_action: serde_json::Value,
 }
 
 fn main() {
@@ -24,66 +19,50 @@ fn main() {
         .unwrap_or(Input { state: Value::Null, params: Value::Null });
 
     // ---------- resolve token ----------
-    let token = std::env::var("DO_TOKEN")
-        .ok()
-        .or_else(|| input.params.get("do_token").and_then(|v| v.as_str()).map(|s| s.to_string()));
+    // Prefer params.do_access_token; accept params.do_token; then env DO_TOKEN/do_access_token
+    let token = input.params.get("do_access_token").and_then(|v| v.as_str())
+        .or_else(|| input.params.get("do_token").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("DO_TOKEN").ok())
+        .or_else(|| std::env::var("do_access_token").ok());
 
-    if token.is_none() {
-        emit_patch(json!({
-            "ok": false,
-            "error": "missing DigitalOcean token: set env DO_TOKEN or params.do_token",
-        }));
+    if token.as_deref().unwrap_or("").is_empty() {
+        eprintln!("Error: missing token (params.do_access_token or env DO_TOKEN)");
         return;
     }
     let token = token.unwrap();
 
-    // ---------- build request body ----------
-    // If params.firewall is present, pass it through untouched (raw DO shape).
-    // Otherwise, synthesize a minimal firewall from helper params.
-    let req_body = if let Some(fw) = input.params.get("firewall") {
-        fw.clone()
-    } else {
-        let name = input.params.get("name").and_then(|v| v.as_str()).unwrap_or("starthub-firewall");
+    // ---------- inputs ----------
+    let name = input.params.get("name").and_then(|v| v.as_str()).unwrap_or("starthub-firewall");
 
-        let droplet_ids: Vec<i64> = input.params.get("droplet_ids")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|x| x.as_i64()).collect())
-            .unwrap_or_default();
+    let droplet_ids: Vec<i64> = input.params.get("droplet_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|x| x.as_i64()).collect())
+        .unwrap_or_default();
 
-        let tags: Vec<String> = input.params.get("tags")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
-            .unwrap_or_default();
+    let tags: Vec<String> = input.params.get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
 
-        let inbound_rules = input.params.get("inbound_rules").cloned().unwrap_or(json!([
-            {
-              "protocol": "tcp",
-              "ports": "22",
-              "sources": { "addresses": ["0.0.0.0/0", "::/0"] }
-            }
-        ]));
+    // sensible defaults if not provided
+    let inbound_rules = input.params.get("inbound_rules").cloned().unwrap_or(json!([
+        { "protocol": "tcp", "ports": "22", "sources": { "addresses": ["0.0.0.0/0", "::/0"] } }
+    ]));
 
-        let outbound_rules = input.params.get("outbound_rules").cloned().unwrap_or(json!([
-            {
-              "protocol": "tcp",
-              "ports": "all",
-              "destinations": { "addresses": ["0.0.0.0/0", "::/0"] }
-            },
-            {
-              "protocol": "udp",
-              "ports": "all",
-              "destinations": { "addresses": ["0.0.0.0/0", "::/0"] }
-            }
-        ]));
+    let outbound_rules = input.params.get("outbound_rules").cloned().unwrap_or(json!([
+        { "protocol": "tcp", "ports": "all", "destinations": { "addresses": ["0.0.0.0/0", "::/0"] } },
+        { "protocol": "udp", "ports": "all", "destinations": { "addresses": ["0.0.0.0/0", "::/0"] } }
+    ]));
 
-        json!({
-            "name": name,
-            "droplet_ids": droplet_ids,
-            "tags": tags,
-            "inbound_rules": inbound_rules,
-            "outbound_rules": outbound_rules
-        })
-    };
+    // ---------- build DO payload ----------
+    let req_body = json!({
+        "name": name,
+        "droplet_ids": droplet_ids,
+        "tags": tags,
+        "inbound_rules": inbound_rules,
+        "outbound_rules": outbound_rules
+    });
 
     // ---------- call DO API ----------
     let resp = Client::new()
@@ -102,32 +81,33 @@ fn main() {
             let status = r.status_code();
             let body = r.body().unwrap_or_default();
 
-            // Try JSON; fall back to raw string
-            let body_json: Value = match serde_json::from_slice(&body) {
-                Ok(v) => v,
-                Err(_) => json!({ "raw": String::from_utf8_lossy(&body) }),
-            };
+            let body_json: Value = serde_json::from_slice(&body)
+                .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&body) }));
 
-            emit_patch(json!({
-                "ok": (200..300).contains(&status),
-                "status": status,
-                "request": req_body,
-                "firewall_id": body_json.get("firewall").and_then(|f| f.get("id")).cloned(),
-                "response": body_json
-            }));
+            if (200..300).contains(&status) {
+                let fw_id = body_json
+                    .get("firewall").and_then(|f| f.get("id")).and_then(|id| id.as_str())
+                    .unwrap_or_default();
+
+                if fw_id.is_empty() {
+                    eprintln!("Error: firewall.id not found in response");
+                    eprintln!("{}", serde_json::to_string_pretty(&body_json).unwrap());
+                    return;
+                }
+
+                // ✅ Emit exactly what the manifest declares
+                println!("::starthub:state::{}", json!({ "firewall_id": fw_id }).to_string());
+
+                // Human-readable log
+                let fw_name = body_json.get("firewall").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or(name);
+                eprintln!("Created firewall '{}' ({})", fw_name, fw_id);
+            } else {
+                eprintln!("DigitalOcean API returned status {}", status);
+                eprintln!("{}", serde_json::to_string_pretty(&body_json).unwrap());
+            }
         }
         Err(e) => {
-            emit_patch(json!({
-                "ok": false,
-                "error": format!("request error: {}", e),
-                "request": req_body
-            }));
+            eprintln!("Request error: {}", e);
         }
     }
-}
-
-fn emit_patch(value: serde_json::Value) {
-    let patch = Patch { my_action: value };
-    let line = format!("::starthub:state::{}", serde_json::to_string(&patch).unwrap());
-    println!("{}", line);
 }

@@ -1,0 +1,16 @@
+{
+  "name": "create-do-firewall-wasm",
+  "version": "0.0.13",
+  "ref": "https://github.com/starthubhq/create-do-firewall-wasm/releases/download/v0.0.13/module.wasm",
+  "inputs": [
+    { "name": "do_access_token", "description": "DigitalOcean access token", "type": "string" },
+    { "name": "name",            "description": "Firewall name",             "type": "string",  "default": "starthub-firewall" },
+    { "name": "droplet_ids",     "description": "Droplet IDs to attach",     "type": "array",   "items": { "type": "integer" }, "default": [] },
+    { "name": "tags",            "description": "Droplet selector tags",     "type": "array",   "items": { "type": "string"  }, "default": [] },
+    { "name": "inbound_rules",   "description": "Inbound rules (DO schema)", "type": "array",   "items": { "type": "object" }, "default": [] },
+    { "name": "outbound_rules",  "description": "Outbound rules (DO schema)","type": "array",   "items": { "type": "object" }, "default": [] }
+  ],
+  "outputs": [
+    { "name": "firewall_id", "description": "ID of the created firewall", "type": "string" }
+  ]
+}
