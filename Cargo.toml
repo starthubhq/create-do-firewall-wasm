@@ -1,6 +1,6 @@
 [package]
-name = "httpclient"
-version = "0.0.10"
+name = "create-do-firewall-wasm"
+version = "0.0.12"
 edition = "2021"
 rust-version = "1.82"
 publish = false
