@@ -1,5 +1,5 @@
 [package]
-name = "http-client"
+name = "httpclient"
 version = "0.0.10"
 edition = "2021"
 rust-version = "1.82"
